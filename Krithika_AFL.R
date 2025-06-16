@@ -196,8 +196,8 @@ for(i in 1:nrow(afl_test)){
 afl_test$Elo_diff <- round(afl_test$ELO - afl_test$Opp_ELO, 2)
 
 
-#data manipulation
-#Recent form - last 3 - 5 games (no of wins/avg wins) and margin 
+#data manipulations
+#Recent form - last 3 - 5 games (no of wins/avg wins) and margin
 #Rest time/ (travel time) - time since last match - afl might be alirght as there is a match played every weekend, cant be two in a week
 #Both elos into consideration, instead of just the difference
 #Big player absences
@@ -208,7 +208,6 @@ afl_test$Elo_diff <- round(afl_test$ELO - afl_test$Opp_ELO, 2)
 
 #How can the model predict upsets?
 str(afl_test)
-
 
 #Adding two additional columns for last 3 wins and avg margin of the last 3 games
 afl_test <- afl_test %>%
@@ -224,6 +223,38 @@ afl_test <- afl_test %>%
 afl_test$Last3Wins[is.na(afl_test$Last3Wins)] <- 0
 afl_test$AvgLast3Margin[is.na(afl_test$AvgLast3Margin)] <- 0
 
+#Weather ----
+install.packages("remotes")
+
+#from githib
+remotes::install_github("ropensci/bomrang")
+
+
+library(bomrang)
+
+
+head(bomrang::stations_meta)
+locations_weather <- bomrang::sweep_for_stations()
+
+?get_historical
+melb_data <- get_historical(stationid = "086338", latlon = NULL, radius = NULL, type = "daily")
+
+bomrang::sta
+melbourne_stations <- subset(bomrang::stations_meta, grepl("MELBOURNE", site))
+melbourne_stations
+
+
+
+stations <- get_historical_stations()
+head(stations)
+get_historical_weather()
+
+
+# For Melbourne (Olympic Park)
+melb_weather <- get_historical_weather(station_name = "Melbourne (Olympic Park)")
+
+
+
 #Variables to discard
 #last3wins is probably redundant and not that significant
 #Round - has a slight effect on the later rounds but doesnt make too much of an impact
@@ -233,7 +264,7 @@ afl_test$AvgLast3Margin[is.na(afl_test$AvgLast3Margin)] <- 0
 split <- initial_split(afl_test)
 train <- training(split)
 test <- testing(split)
-model1 <- glm(Result ~ Home + Elo_diff + Round + Last3Wins + AvgLast3Margin, data = afl_test, family = binomial(link = "logit"))
+model1 <- glm(Result ~ Home + Elo_diff + ELO + Opp_ELO + AvgLast3Margin, data = afl_test, family = binomial(link = "logit"))
 tab_model(model1)
 summary(model1)
 #Making predictions on this model
@@ -243,7 +274,7 @@ predicted.classes <- ifelse(probabilities > .5, 1, 0)
 #Accuracy
 accuracy <- mean(predicted.classes == test$Result)
 print(paste("Accuracy:", round(accuracy, 4)))
-
+#accuracy = 60.22
 
 library(pROC)
 
@@ -347,7 +378,7 @@ xgb_spec <- boost_tree() %>%
 
 #Fitting the model ----
 xgb_fit <- xgb_spec %>% 
-  fit(Result ~ Home + Elo_diff, data = xgb_train)
+  fit(Result ~ Home + Elo_diff + Round + Last3Wins + AvgLast3Margin, data = xgb_train)
 class(xgb_fit)
 
 # Make predictions on the training set ----
@@ -379,8 +410,6 @@ xgb_fit %>%
 xgb_fit %>%
   vip()
 
-#Additional
-var_importance <- xgb.importance(model = xgb_fit$fit)
 
 
 

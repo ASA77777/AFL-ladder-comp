@@ -1,17 +1,111 @@
-# Template
-
-# Load libaries
-library(dplyr) # For data manipulation
+#Loading libraries
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(elo)
+library(rsample)
+library(caret)
 library(fitzRoy) # For AFL data
+
 
 # Fetch data using FitzRoy package functions
 # See FitzRoy documentation 
+afl_data <- fitzRoy::fetch_player_stats_afltables(season = 2000:2024)
+afl <- fetch_results_afltables(season = 1897:2024)
+colSums(is.na(afl))
+
+afl$Result <- ifelse(afl$Margin > 0, 1, ifelse(afl$Margin < 0, 0, 0.5))
+
+afl <- afl %>%
+  select(Round.Number, Home.Team, Away.Team, Result)
+
+elo_basic <- elo::elo.run(formula = Result ~ Home.Team + Away.Team,
+                          data = afl,
+                          initial.elos = 1500,
+                          k = 20,
+                          history = T) %>%
+  as.data.frame()
+
+
+head(elo_basic)
+
+#Hyperparatmeter tuning
+#Splitting data into training and testing sets
+split <- initial_split(afl)
+train <- training(split)
+test <- testing(split)
+
+# Write a function
+elo_score <- function(initial_elos, k, data){
+  
+  # obtain elo ratings
+  elo <- elo::elo.run(formula = Result ~ Home.Team + Away.Team,
+                      initial_elos = initial_elos,
+                      k = k,
+                      data = data) %>%
+    as.data.frame()
+  
+  data <- data %>% 
+    mutate(p.A = elo$p.A) %>% 
+    mutate(pred = ifelse(p.A > .5, 1, 0))
+  
+  cm <- caret::confusionMatrix(data = factor(data$pred, levels = c(0,0.5,1)),
+                               reference = factor(data$Result, levels = c(0, 0.5,1)))
+  
+  return(list(cm))
+  
+}
+
+# Create a grid 
+params <- expand.grid(init = seq(1000, 3000, by = 50),
+                      kfac = seq(10, 50, by = 5))
+
+
+# Apply the function 
+params$accuracy <- apply(X = params,
+                         MARGIN = 1,
+                         FUN = function(x)
+                           elo_score(x[1], x[2], train)[[1]]$overall["Accuracy"])
+
+#ALL accuracies are the same - some issue here. Will have to check
+# Optimal Parameters
+best <- subset(params, accuracy == max(params$accuracy))
+best$accuracy1 <- NULL
+head(best)
 
 
 
+elo_final <- elo::elo.run(formula = Result ~ Home.Team + Away.Team,
+                          data = afl,
+                          initial.elos = 1000,
+                          k = 10,
+                          history = T) 
+elo_final_df <- elo_final %>% 
+  as.data.frame()
+
+#Making predictions
+test$predictions <- predict(elo_final, test, type = "prob")
+
+# Predicted win or loss based on probability
+test$pred.Result <- ifelse(test$predictions > 0.5, 1, ifelse(test$predictions < 0.5, 0, 0.5))
+
+test <- test %>%
+  mutate(pred.result1 = ifelse(predictions > 0.5, "Win", ifelse(predictions < 0.5, "Loss", "Draw"))) %>%
+  mutate(actual.result = ifelse(Result > 0.5, "Win", ifelse(Result < 0.5, "Loss", "Draw")))
+
+cm <- caret::confusionMatrix(data =  factor(test$actual.result, levels = c("Win", "Loss")),
+                             reference = factor(test$pred.result1, levels = c("Win", "Loss")))
+# Accuracy ----
+cm$overall["Accuracy"]
 
 
 
+#GLM
+colnames(afl)
+model1 <- glm(Result ~ Home.Team + Away.Team, data = afl, family = binomial(link = "logit"))
+install.packages("sjPlot")
+library(sjPlot)
+tab_model(model1)
 
 # Data Manipulation 
 
@@ -34,15 +128,15 @@ library(fitzRoy) # For AFL data
 library(elo)
 # Creating the ELO logic
 # My two datasets I have used here are results and teams_elo, results has all the data and teams_elo is the teams and their elo
-for(i in 1:nrow(results)){
+for(i in 1:nrow(afl)){
   if(i %% 2 != 0){ 
     print(i)
     
-    Team_A <- results$Team[i]
-    Team_B <- results$Team[i+1]
+    Team_A <- afl$Team[i]
+    Team_B <- afl$Team[i+1]
     
-    Result_A <- results$Result[i]
-    Result_B <- results$Result[i+1]
+    Result_A <- afl$Result[i]
+    Result_B <- afl$Result[i+1]
     
     ## Get Current ELO ##
     
